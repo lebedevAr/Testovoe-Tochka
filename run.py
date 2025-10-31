@@ -1,6 +1,7 @@
 import sys
 import heapq
 
+#test
 ROOM_INFO = {"room_depth": 0, "entrances": [2, 4, 6, 8]}
 ENERGY_COST = {'A': 1, 'B': 10, 'C': 100, 'D': 1000}
 TARGETS = {'A': 0, 'B': 1, 'C': 2, 'D': 3}
