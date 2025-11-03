@@ -115,6 +115,8 @@ def find_gate_to_close_con(graph, gates, virus_pos):
 
     if edges_to_cut:
         return min(edges_to_cut)
+    else:
+        return None
 
 
 def solve(edges: list[tuple[str, str]]) -> list[str]:
