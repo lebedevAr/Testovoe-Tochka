@@ -5,219 +5,165 @@ from typing import List, Tuple, Set, Optional
 
 def get_graph(edges):
     graph = defaultdict(set)
-    gates = set()
-
     for u, v in edges:
         graph[u].add(v)
         graph[v].add(u)
-
-        # Определяем шлюзы
-        if u.isupper():
-            gates.add(u)
-        if v.isupper():
-            gates.add(v)
-
-    return graph, gates
+    return dict(graph)
 
 
-def find_shortest_path_to_gate(graph, gates, start):
-    queue = deque([(start, [])])
-    visited = set(start)
+def get_virus_move(graph, virus_pos):
+    nodes = set(graph.keys())
+    gates = sorted([n for n in nodes if n and n.isupper()])
 
-    while queue:
-        current, path = queue.popleft()
-        if current in gates:
-            return path + [current]
+    target_gate = None
+    best_dist = float('inf')
+    dist_map = None
 
-        for neighbor in sorted(graph[current]):
-            if neighbor not in visited:
-                visited.add(neighbor)
-                queue.append((neighbor, path + [current]))
-
-    return None
-
-
-def get_next_move(graph, gates, cur_pos):
-    # Находим все шлюзы и расстояния до них
-    gate_distances = []
-
-    for gate in sorted(gates):
-        queue = deque([(cur_pos, 0)])
-        visited = set(cur_pos)
+    for gate in gates:
+        dist = {gate: 0}
+        queue = deque([gate])
 
         while queue:
-            node, dist = queue.popleft()
+            cur = queue.popleft()
+            for neighbor in graph.get(cur, set()):
+                if neighbor not in dist:
+                    dist[neighbor] = dist[cur] + 1
+                    queue.append(neighbor)
 
-            if node == gate:
-                gate_distances.append((dist, gate))
-                break
+        if virus_pos not in dist:
+            continue
 
-            for neighbor in sorted(graph[node]):
-                if neighbor not in visited:
-                    visited.add(neighbor)
-                    queue.append((neighbor, dist + 1))
+        distance = dist[virus_pos]
+        if distance == best_dist and gate < target_gate or distance < best_dist:
+            target_gate = gate
+            best_dist = distance
+            dist_map = dist
 
-    if not gate_distances:
+    if target_gate is None:
         return None
 
-    # Выбираем ближайший шлюз
-    min_dist = min(dist for dist, _ in gate_distances)
-    candidates = [gw for dist, gw in gate_distances if dist == min_dist]
-    target_gate = min(candidates)
+    # Если вирус уже у шлюза
+    if best_dist == 0:
+        return target_gate, target_gate, dist_map
 
     # Находим следующий шаг к целевому шлюзу
-    queue = deque([(cur_pos, [])])
-    visited = set(cur_pos)
+    candidates = []
+    for neighbor in sorted(graph.get(virus_pos, [])):
+        if dist_map.get(neighbor, float('inf')) == best_dist - 1:
+            candidates.append(neighbor)
 
-    while queue:
-        current, path = queue.popleft()
+    if not candidates:
+        return None
 
-        if current == target_gate:
-            if path:
-                return path[0]
-            return None
+    next_node = candidates[0]
+    return target_gate, next_node, dist_map
 
-        for neighbor in sorted(graph[current]):
-            if neighbor not in visited:
-                visited.add(neighbor)
 
-                if current == cur_pos:
-                    new_path = [neighbor]
-                else:
-                    new_path = path + [current]
-                queue.append((neighbor, new_path))
+def search_solution(edges, virus_pos):
+    graph = get_graph(set(edges))
+    move = get_virus_move(graph, virus_pos)
 
+    # Если вирус не может достичь ни одного шлюза - решение найдено
+    if move is None:
+        return None, []
+
+    # Собираем все возможные отключения
+    candidates = []
+    for edge in edges:
+        u, v = edge
+        if u.isupper() and not v.isupper():
+            candidates.append((u, v))
+        elif v.isupper() and not u.isupper():
+            candidates.append((v, u))
+    unique_candidates = sorted(set(candidates))
+
+    for gate, node in unique_candidates:
+        if gate <= node:
+            edge_canonical = (gate, node)
+        else:
+            edge_canonical = (node, gate)
+        if edge_canonical not in edges:
+            continue
+
+        new_edges = set(edges) - {edge_canonical}
+        new_edges_frozen = frozenset(new_edges)
+
+        # Проверяем, может ли вирус двигаться после отключения
+        new_graph = get_graph(new_edges)
+        new_move = get_virus_move(new_graph, virus_pos)
+        if new_move is None:
+            return (gate, node), []
+
+        _, next_pos, _ = new_move
+
+        # Если вирус сразу попал в шлюз - этот вариант не подходит
+        if next_pos.isupper():
+            continue
+
+        result = search_solution(new_edges_frozen, next_pos)
+        if result:
+            first_edge, rest_edges = result
+            solution = [(gate, node)]
+            if first_edge:
+                solution.append(first_edge)
+            solution.extend(rest_edges)
+            if solution:
+                return solution[0], solution[1:]
+            else:
+                return None, []
     return None
-
-
-def get_danger_gates(graph, gateways, virus_pos):
-    dangered_gates = []
-    for gateway in sorted(gateways):
-        if virus_pos in graph[gateway]:
-            dangered_gates.append(gateway)
-    return dangered_gates
-
-
-def find_optimal_blocking_sequence(start_node, blocked_edges, exit_edges, graph, gates):
-    blocked_set = set(blocked_edges)
-
-    # Пробуем каждое доступное ребро для блокировки
-    for edge in exit_edges:
-        if edge in blocked_set:
-            continue
-
-        new_blocked = blocked_edges + [edge]
-
-        if len(new_blocked) == len(exit_edges):
-            return True, new_blocked
-
-        next_pos = get_next_move(graph, gates, start_node)
-        if next_pos is None:
-            return True, new_blocked
-
-        if next_pos in gates:
-            continue
-
-        success, result = find_optimal_blocking_sequence(
-            next_pos, new_blocked, exit_edges, graph, gates
-        )
-
-        if success:
-            return True, result
-
-    return False, None
-
-
-def get_exit_edges(graph, gates):
-    exit_edges = []
-    for gate in sorted(gates):
-        for neighbor in sorted(graph[gate]):
-            if not neighbor.isupper():
-                exit_edges.append((gate, neighbor))
-    return exit_edges
 
 
 def solve(edges: List[Tuple[str, str]]) -> List[str]:
     """
-    Решение задачи об изоляции вируса
+        Решение задачи об изоляции вируса
 
-    Args:
-        edges: список коридоров в формате (узел1, узел2)
+        Args:
+            edges: список коридоров в формате (узел1, узел2)
 
-    Returns:
-        список отключаемых коридоров в формате "Шлюз-узел"
+        Returns:
+            список отключаемых коридоров в формате "Шлюз-узел"
     """
-    # Строим граф и определяем шлюзы
-    graph, gates = get_graph(edges)
+    # Преобразуем рёбра в каноническую форму
+    canonical_edges = {(u, v) if u <= v else (v, u) for u, v in edges}
+    edges_frozen = frozenset(canonical_edges)
 
-    # Получаем все соединения шлюзов с узлами
-    exit_edges = get_exit_edges(graph, gates)
-
-    is_success, result_edges = find_optimal_blocking_sequence("a", [], exit_edges, graph, gates)
-
-    if not is_success or result_edges is None:
-        return solve_old(edges)
-
-
-    return [f"{gate}-{node}" for gate, node in result_edges]
-
-
-def solve_old(edges: List[Tuple[str, str]]) -> List[str]:
-    graph, gates = get_graph(edges)
-    virus_pos = 'a'
-    result = []
+    sequence = []
+    current_edges = edges_frozen
+    current_virus = 'a'
 
     while True:
-        # Проверяем шлюзы, до которых вирус может дойти за 1 ход
-        dangered_gates = get_danger_gates(graph, gates, virus_pos)
+        # Ищем следующее отключение
+        result = search_solution(current_edges, current_virus)
+        if result is None:
+            break
 
-        if dangered_gates:
-            gate_to_block = min(dangered_gates)
-            edge_to_cut = f"{gate_to_block}-{virus_pos}"
-            result.append(edge_to_cut)
-            gate, node = edge_to_cut.split('-')
-            graph[gate].discard(node)
-            graph[node].discard(gate)
+        first_edge, _ = result
+        if first_edge is None:
+            break
 
-            # Проверяем, может ли вирус двигаться дальше
-            next_move = get_next_move(graph, gates, virus_pos)
-            if next_move is None:
-                break
-            else:
-                virus_pos = next_move
+        sequence.append(first_edge)
+
+        if first_edge[0] <= first_edge[1]:
+            edge_to_remove = (first_edge[0], first_edge[1])
         else:
-            next_move = get_next_move(graph, gates, virus_pos)
-            if next_move is None:
-                break
+            edge_to_remove = (first_edge[1], first_edge[0])
+        current_edges = current_edges - {edge_to_remove}
 
-            path = find_shortest_path_to_gate(graph, gates, virus_pos)
-            if not path:
-                break
+        # Симулируем ход вируса
+        current_graph = get_graph(current_edges)
+        move = get_virus_move(current_graph, current_virus)
 
-            # Находим первый шлюз на пути и блокируем соединение с ним
-            gate_on_path = None
-            for node in path:
-                if node in gates:
-                    gate_on_path = node
-                    break
+        if move is None:
+            break
 
-            if gate_on_path:
-                # Находим все соединения этого шлюза на пути вируса
-                connections = []
-                for neighbor in graph[gate_on_path]:
-                    if neighbor in path:
-                        connections.append(f"{gate_on_path}-{neighbor}")
+        _, next_pos, _ = move
+        if next_pos.isupper():
+            break
 
-                if connections:
-                    edge_to_cut = min(connections)
-                    result.append(edge_to_cut)
-                    gate, node = edge_to_cut.split('-')
-                    graph[gate].discard(node)
-                    graph[node].discard(gate)
+        current_virus = next_pos
 
-            virus_pos = next_move
-
-    return result
+    return [f"{gate}-{node}" for gate, node in sequence]
 
 
 def main():
